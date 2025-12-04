@@ -1,0 +1,113 @@
+# ============================================================================================
+#                     DYNAMIC PRESSURE ADVANCE (DPA) + DYNAMIC FLOW (DFA)
+#                                 SYSTEM ARCHITECTURE OVERVIEW
+# ============================================================================================
+#
+# This printer is using TWO fully dynamic closed-loop extrusion compensation systems:
+#
+#      • DPA — Dynamic Pressure Advance (adjusts Klipper PA in real time)
+#      • DFA — Dynamic Flow Adjustment (adjusts flow multiplier in real time)
+#
+# Both systems respond to “slip” (%) values reported by the filament sensor (SFS) or
+# by XY drivetrain slip detection. Slip is written into `last_slip` via macros.
+#
+# These systems run independently but simultaneously:
+#
+#      • DPA corrects for nozzle pressure effects (corners, accelerations)
+#      • DFA corrects for volumetric flow effects (under/over extrusion)
+#
+# ============================================================================================
+#                             WHERE FILAMENT PRESETS MUST BE SET
+# ============================================================================================
+#
+# Do NOT place filament presets inside Klipper macros or printer.cfg.
+# Do NOT place filament presets inside PRINT_START.
+# Do NOT duplicate presets inside this config.
+#
+# Filament-specific tuning MUST be placed ONLY inside:
+#
+#      **OrcaSlicer → Filament Settings → Filament G-code**
+#
+# This allows per-filament control without modifying firmware.
+#
+# Example (ABS / ASA):
+#
+#     ; Dynamic Pressure Advance
+#     DPA_SET_BASE PA=0.065
+#     DPA_CONFIG MIN=0.020 MAX=0.200 GAIN=0.008 DAMP=0.85
+#     DPA_ON
+#
+#     ; Dynamic Flow Adjustment
+#     DFA_SET_BASE FLOW=1.02
+#     DFA_CONFIG MIN=0.92 MAX=1.18 GAIN=0.017 DAMP=0.75
+#     DFA_ON
+#
+# Orca automatically injects these commands BEFORE PRINT_START runs.
+#
+# ============================================================================================
+#                          WHAT LIVES IN KLIPPER CONFIG FILES
+# ============================================================================================
+#
+# The following items belong ONLY in Klipper (e.g., pa.cfg, flow.cfg):
+#
+#      ✔ The DPA engine (_DPA_CORE)
+#      ✔ The DFA engine (_DFA_CORE)
+#      ✔ The delayed loop timers (DPA_LOOP / DFA_LOOP)
+#      ✔ The control macros (DPA_ON/OFF, DPA_CONFIG, DPA_SET_BASE, etc.)
+#      ✔ The flow macros (DFA_ON/OFF, DFA_CONFIG, DFA_SET_BASE)
+#
+# These provide the *mechanics* of dynamic compensation, not presets.
+#
+# ============================================================================================
+#                                  START/END G-CODE RULES
+# ============================================================================================
+#
+# PRINT_START:
+#    • MUST NOT contain DPA_SET_BASE, DFA_SET_BASE, DPA_CONFIG, DFA_CONFIG
+#    • MUST NOT contain any hard-coded PA or Flow values
+#    • Simply handles homing, heat, QGL, mesh, purge, etc.
+#
+# PRINT_END:
+#    MUST disable both systems and restore baseline:
+#
+#        DPA_OFF
+#        DFA_OFF
+#
+# ============================================================================================
+#                               HOW CLOSED-LOOP CORRECTION WORKS
+# ============================================================================================
+#
+# 1. Filament profile (in Orca) declares:
+#        • baseline PA (e.g., 0.065)
+#        • baseline Flow (e.g., 1.02)
+#        • limits + gain + damping
+#
+# 2. PRINT_START begins
+#      → presets are already applied
+#
+# 3. Klipper enters DPA_LOOP and DFA_LOOP at 0.12s intervals
+#      → reads `last_slip`
+#      → updates PA and Flow continuously
+#
+# 4. Slip > 0 = under-extrusion → DPA ↑ / Flow ↑
+#    Slip < 0 = over-extrusion  → DPA ↓ / Flow ↓
+#
+# 5. PRINT_END restores baseline PA + Flow for safety.
+#
+# ============================================================================================
+#                                       SUMMARY
+# ============================================================================================
+#
+# • Filament presets → Orca (per-filament)
+# • Engines + logic → Klipper
+# • Start code → PRINT_START (no PA/Flow logic)
+# • End code → PRINT_END (DPA_OFF + DFA_OFF)
+#
+# This architecture mirrors the approach used by modern closed-loop 3D printers
+# (Bambu, Prusa AFS, Markforged) and ensures:
+#
+#      • consistent extrusion across spools
+#      • automatic compensation for slip, pressure lag, and flow constraints
+#      • no human tuning required mid-print
+#
+# ============================================================================================
